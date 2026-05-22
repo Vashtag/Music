@@ -311,7 +311,8 @@ class AmbientEngine {
     const limiter = new Tone.Limiter(-2);
     const master  = new Tone.Volume(-8);
     this.analyser = new Tone.Analyser('waveform', 512);
-    master.chain(filter, reverb, limiter, this.analyser, Tone.Destination);
+    master.chain(filter, reverb, limiter, this.analyser);
+    this.analyser.toDestination();
     this.nodes.push(reverb, filter, limiter, master);
 
     // Pad
@@ -379,13 +380,13 @@ class AmbientEngine {
     pp.loop=true; pp.loopEnd=`${this.p.totalBars}m`; this.parts.push(pp);
   }
 
-  // Texture goes direct to Tone.Destination — bypasses the reverb/filter chain
   _buildTexture(type) {
     const mk = (color, ffreq, ftype, vol, lfoHz) => {
       const noise = new Tone.Noise(color).start();
       const filt  = new Tone.Filter(ffreq, ftype);
       const v     = new Tone.Volume(vol);
-      noise.chain(filt, v, Tone.Destination);
+      noise.chain(filt, v);
+      v.toDestination();
       if (lfoHz) { const lfo=new Tone.LFO({frequency:lfoHz,min:vol-4,max:vol+2}).start(); lfo.connect(v.volume); this.nodes.push(lfo); }
       this.nodes.push(noise,filt,v);
     };
