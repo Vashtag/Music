@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AmbientForge</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="bg-canvas"></canvas>
+
+  <div class="app">
+    <header>
+      <div class="logo">
+        <span class="logo-icon">&#9650;</span>
+        <h1>AmbientForge</h1>
+      </div>
+      <p class="tagline">Craft instrumental ambience for your channel</p>
+    </header>
+
+    <main>
+      <!-- Mood Grid -->
+      <section class="section">
+        <h2 class="section-title">Choose a Mood</h2>
+        <div class="mood-grid">
+          <!-- Nature -->
+          <div class="mood-card" data-mood="forest-rain" data-style="nature">
+            <div class="mood-icon">&#127780;</div>
+            <div class="mood-name">Forest Rain</div>
+            <div class="mood-style">Nature</div>
+          </div>
+          <div class="mood-card" data-mood="ocean-drift" data-style="nature">
+            <div class="mood-icon">&#127754;</div>
+            <div class="mood-name">Ocean Drift</div>
+            <div class="mood-style">Nature</div>
+          </div>
+          <div class="mood-card" data-mood="peaceful-meadow" data-style="nature">
+            <div class="mood-icon">&#127807;</div>
+            <div class="mood-name">Peaceful Meadow</div>
+            <div class="mood-style">Nature</div>
+          </div>
+          <!-- Space -->
+          <div class="mood-card" data-mood="deep-space" data-style="space">
+            <div class="mood-icon">&#127756;</div>
+            <div class="mood-name">Deep Space</div>
+            <div class="mood-style">Space</div>
+          </div>
+          <div class="mood-card" data-mood="nebula-drift" data-style="space">
+            <div class="mood-icon">&#10024;</div>
+            <div class="mood-name">Nebula Drift</div>
+            <div class="mood-style">Space</div>
+          </div>
+          <div class="mood-card" data-mood="stellar-journey" data-style="space">
+            <div class="mood-icon">&#127775;</div>
+            <div class="mood-name">Stellar Journey</div>
+            <div class="mood-style">Space</div>
+          </div>
+          <!-- Lo-fi -->
+          <div class="mood-card" data-mood="late-night" data-style="lofi">
+            <div class="mood-icon">&#127756;</div>
+            <div class="mood-name">Late Night Study</div>
+            <div class="mood-style">Lo-fi</div>
+          </div>
+          <div class="mood-card" data-mood="rainy-cafe" data-style="lofi">
+            <div class="mood-icon">&#9749;</div>
+            <div class="mood-name">Rainy Café</div>
+            <div class="mood-style">Lo-fi</div>
+          </div>
+          <div class="mood-card" data-mood="nostalgic" data-style="lofi">
+            <div class="mood-icon">&#127897;</div>
+            <div class="mood-name">Nostalgic Afternoon</div>
+            <div class="mood-style">Lo-fi</div>
+          </div>
+          <!-- Dark/Cinematic -->
+          <div class="mood-card" data-mood="tense" data-style="dark">
+            <div class="mood-icon">&#9760;</div>
+            <div class="mood-name">Tense Atmosphere</div>
+            <div class="mood-style">Dark</div>
+          </div>
+          <div class="mood-card" data-mood="mysterious" data-style="dark">
+            <div class="mood-icon">&#128300;</div>
+            <div class="mood-name">Mysterious Cave</div>
+            <div class="mood-style">Dark</div>
+          </div>
+          <div class="mood-card" data-mood="epic" data-style="dark">
+            <div class="mood-icon">&#9889;</div>
+            <div class="mood-name">Epic Horizon</div>
+            <div class="mood-style">Dark</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Duration -->
+      <section class="section">
+        <h2 class="section-title">Duration</h2>
+        <div class="duration-control">
+          <div class="duration-presets">
+            <button class="dur-btn" data-minutes="5">5 min</button>
+            <button class="dur-btn" data-minutes="15">15 min</button>
+            <button class="dur-btn active" data-minutes="30">30 min</button>
+            <button class="dur-btn" data-minutes="60">1 hr</button>
+            <button class="dur-btn" data-minutes="120">2 hr</button>
+          </div>
+          <div class="duration-custom">
+            <label>Custom: <input type="number" id="custom-minutes" min="1" max="180" placeholder="min" /></label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Generate -->
+      <section class="section generate-section">
+        <button id="generate-btn" class="generate-btn" disabled>
+          <span class="btn-icon">&#9654;</span>
+          <span class="btn-label">Select a Mood to Generate</span>
+        </button>
+        <div class="status-row" id="status-row" style="display:none">
+          <div class="progress-bar-wrap">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+          <span class="status-text" id="status-text">Initializing...</span>
+        </div>
+      </section>
+
+      <!-- Visualizer -->
+      <section class="section visualizer-section" id="visualizer-section" style="display:none">
+        <canvas id="visualizer"></canvas>
+        <div class="playback-controls">
+          <button id="play-pause-btn" class="ctrl-btn">&#9646;&#9646; Pause</button>
+          <button id="stop-btn" class="ctrl-btn ctrl-stop">&#9632; Stop</button>
+          <button id="download-btn" class="ctrl-btn ctrl-download" style="display:none">&#8681; Download Audio</button>
+        </div>
+        <div class="now-playing" id="now-playing"></div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Generated entirely in your browser &mdash; no data sent anywhere &mdash; downloads as WebM audio (compatible with YouTube, DaVinci Resolve, Premiere, VLC)</p>
+    </footer>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
