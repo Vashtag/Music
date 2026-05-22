@@ -29,36 +29,32 @@ function transposeNote(note, semitones) {
   return midiToNote(Tone.Frequency(note).toMidi() + semitones);
 }
 
-function randomBetween(min, max) {
-  return min + Math.random() * (max - min);
-}
-
-function pickFrom(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+function randomBetween(min, max) { return min + Math.random() * (max - min); }
+function pickFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 function buildScaleNotes(rootNote, scaleType, octaves = 2) {
   const rootMidi = Tone.Frequency(rootNote).toMidi();
   const notes = [];
-  for (let o = 0; o < octaves; o++) {
+  for (let o = 0; o < octaves; o++)
     SCALE_INTERVALS[scaleType].forEach(s => notes.push(midiToNote(rootMidi + s + o * 12)));
-  }
   return notes;
 }
 
-// Convert beat position (float, 4 beats = 1 bar) to Tone.js "bar:beat:16th" string
+// Use integer 16th-note arithmetic to avoid floating-point rounding glitches
 function beatsToToneTime(totalBeats) {
-  const bar  = Math.floor(totalBeats / 4);
-  const beat = Math.floor(totalBeats % 4);
-  const s16  = Math.round((totalBeats % 1) * 4);
-  return `${bar}:${beat}:${s16}`;
+  const s16  = Math.round(totalBeats * 4);
+  const bar  = Math.floor(s16 / 16);
+  const rem  = s16 % 16;
+  const beat = Math.floor(rem / 4);
+  const six  = rem % 4;
+  return `${bar}:${beat}:${six}`;
 }
 
-const ARP_SPEED_BEATS = { '1m': 4, '2n': 2, '4n': 1, '8n': 0.5, '16n': 0.25, '4n.': 1.5 };
+const BEAT_LENGTHS = { '1m': 4, '2n': 2, '4n': 1, '8n': 0.5, '16n': 0.25, '4n.': 1.5 };
 
-// Pre-compute all arp events for one full loop
+// ─── Event builders ───────────────────────────────────────────────────────────
 function computeArpEvents(progression, pattern, arpSpeed) {
-  const speedBeats = ARP_SPEED_BEATS[arpSpeed] || 1;
+  const speedBeats = BEAT_LENGTHS[arpSpeed] || 1;
   const events = [];
   let startBeat = 0;
   for (const chord of progression) {
@@ -68,13 +64,8 @@ function computeArpEvents(progression, pattern, arpSpeed) {
     let beatInChord = 0, step = 0;
     while (beatInChord < chordBeats - speedBeats * 0.4) {
       const patIdx = pattern[step % pattern.length];
-      if (patIdx >= 0) {
-        events.push({
-          time:     beatsToToneTime(startBeat + beatInChord),
-          note:     arpNotes[patIdx % arpNotes.length],
-          velocity: 0.2 + Math.random() * 0.14,
-        });
-      }
+      if (patIdx >= 0)
+        events.push({ time: beatsToToneTime(startBeat + beatInChord), note: arpNotes[patIdx % arpNotes.length], velocity: 0.28 + Math.random() * 0.10 });
       beatInChord += speedBeats;
       step++;
     }
@@ -83,7 +74,6 @@ function computeArpEvents(progression, pattern, arpSpeed) {
   return events;
 }
 
-// Pre-compute pad chord events
 function computePadEvents(progression) {
   const events = [];
   let startBeat = 0;
@@ -97,7 +87,6 @@ function computePadEvents(progression) {
   return events;
 }
 
-// Pre-compute bass events
 function computeBassEvents(progression) {
   const events = [];
   let startBeat = 0;
@@ -109,62 +98,51 @@ function computeBassEvents(progression) {
   return events;
 }
 
-// Generate a melodic phrase with stepwise contour
-function generateMelodyPhrase(scaleNotes, length = 5, startIdxHint) {
+function generateMelodyPhrase(scaleNotes, length, startIdx) {
   const contours = [
-    [1, 1, -1, 2, -1, 1],
-    [-1, 1, 2, -1, 1, -2],
-    [1, 2, 1, -2, -1, 1],
-    [2, -1, 1, 1, -2, 1],
-    [-1, -1, 2, -1, 2, -1],
-    [1, -2, 1, 2, -1, -1],
+    [1, 1, -1, 2, -1, 1], [-1, 1, 2, -1, 1, -2],
+    [1, 2, 1, -2, -1, 1], [2, -1, 1, 1, -2, 1],
+    [-1, -1, 2, -1, 2, -1], [1, -2, 1, 2, -1, -1],
   ];
   const steps = pickFrom(contours);
-  let idx = startIdxHint !== undefined
-    ? startIdxHint
-    : Math.floor(scaleNotes.length * 0.45) + Math.floor(Math.random() * 3) - 1;
-  idx = Math.max(0, Math.min(scaleNotes.length - 1, idx));
-
+  let idx = Math.max(0, Math.min(scaleNotes.length - 1, startIdx));
   const notes = [];
   for (let i = 0; i < length; i++) {
-    notes.push(scaleNotes[Math.max(0, Math.min(scaleNotes.length - 1, idx))]);
-    idx += steps[i % steps.length];
-    idx = Math.max(0, Math.min(scaleNotes.length - 1, idx));
+    notes.push(scaleNotes[idx]);
+    idx = Math.max(0, Math.min(scaleNotes.length - 1, idx + steps[i % steps.length]));
   }
   return notes;
 }
 
-// Compute melody events across the loop
-function computeMelodyEvents(progression, scaleRoot, scaleType, melodyEvery, melodyRegister) {
+function computeMelodyEvents(progression, scaleRoot, scaleType, melodyEvery, register) {
   if (!melodyEvery) return [];
-  // melodyRegister 0 = lower octave start, 1 = upper
   const scaleNotes  = buildScaleNotes(scaleRoot, scaleType, 2);
-  const startIdxHint = Math.floor(scaleNotes.length * (melodyRegister === 1 ? 0.6 : 0.35));
+  const baseIdx     = Math.floor(scaleNotes.length * (register === 1 ? 0.6 : 0.35));
   const totalBars   = progression.reduce((s, c) => s + c.bars, 0);
-  const events      = [];
   const noteDurs    = ['4n', '4n', '4n.', '2n'];
+  const events      = [];
 
   for (let bar = 0; bar < totalBars; bar += melodyEvery) {
     if (Math.random() < 0.3) continue;
-    const phraseLen = 4 + Math.floor(Math.random() * 5);
-    const phrase    = generateMelodyPhrase(scaleNotes, phraseLen, startIdxHint + Math.floor(Math.random() * 3) - 1);
-    let beatOffset  = bar * 4 + randomBetween(0, 1.5);
+    const phraseLen  = 4 + Math.floor(Math.random() * 5);
+    const startIdx   = baseIdx + Math.floor(Math.random() * 3) - 1;
+    const phrase     = generateMelodyPhrase(scaleNotes, phraseLen, startIdx);
+    let beatOffset   = bar * 4 + randomBetween(0, 1);
 
     for (const note of phrase) {
       if (beatOffset >= totalBars * 4) break;
       const dur = pickFrom(noteDurs);
-      events.push({ time: beatsToToneTime(beatOffset), note, duration: dur, velocity: 0.16 + Math.random() * 0.22 });
-      beatOffset += ARP_SPEED_BEATS[dur] || 1;
+      events.push({ time: beatsToToneTime(beatOffset), note, duration: dur, velocity: 0.20 + Math.random() * 0.18 });
+      beatOffset += BEAT_LENGTHS[dur] || 1;
     }
   }
   return events;
 }
 
 // ─── Mood Definitions ─────────────────────────────────────────────────────────
-// Each mood has ranges instead of fixed values so every generation sounds different.
-// bpmRange, reverbWetRange, filterFreqRange → picked randomly at init
-// arpPatterns → one pattern picked at random per generation
-// keyVariance → max semitones to transpose the whole piece (0 = no transposition)
+// Reverb wetness is capped at 0.50 — higher values turn music into indistinct wash.
+// Oscillators are sine/triangle only — fat/sawtooth variants sound harsh and staticky.
+// Texture noise is routed around reverb and kept at very low volume (-44 to -50 dB).
 
 const MOODS = {
   'forest-rain': {
@@ -176,18 +154,12 @@ const MOODS = {
       { root: 'F2', quality: 'maj7',  bars: 2 },
       { root: 'G2', quality: 'dom7',  bars: 2 },
     ],
-    scaleRoot: 'C4', scaleType: 'pentatonicMaj',
-    keyVariance: 4,
-    arpPatterns: [
-      [0, 1, 2, 1, 0, 2],
-      [0, 2, 1, 0, 1, 2],
-      [2, 1, 0, 1, 2, 1],
-    ],
-    arpSpeeds: ['4n', '4n', '2n'],
-    padType: 'fatsine',   padAttack: [3, 4.5], padRelease: [4, 6],
-    reverbDecayRange: [10, 14], reverbWetRange: [0.70, 0.86],
-    filterFreqRange: [1600, 2200],
-    texture: 'rain', hasPerc: false, melodyEveryRange: [4, 8],
+    scaleRoot: 'C4', scaleType: 'pentatonicMaj', keyVariance: 4,
+    arpPatterns: [[0,1,2,1,0,2],[0,2,1,0,1,2],[2,1,0,1,2,1]],
+    arpSpeeds: ['4n','4n','2n'],
+    padType: 'sine',     padAttack: [3,4.5], padRelease: [4,6],
+    reverbDecayRange: [5,7],  reverbWetRange: [0.32,0.44],
+    filterFreqRange: [1800,2800], texture: 'rain',  hasPerc: false, melodyEveryRange: [4,8],
   },
   'ocean-drift': {
     label: 'Ocean Drift', style: 'nature', color: '#3498db',
@@ -198,18 +170,12 @@ const MOODS = {
       { root: 'Bb2', quality: 'maj7', bars: 2 },
       { root: 'F2', quality: 'major', bars: 1 },
     ],
-    scaleRoot: 'D4', scaleType: 'pentatonicMin',
-    keyVariance: 3,
-    arpPatterns: [
-      [0, 2, 1, 2, 0],
-      [0, 1, 2, 0, 1],
-      [2, 0, 1, 2, 1],
-    ],
-    arpSpeeds: ['2n', '2n', '4n.'],
-    padType: 'fatsine',   padAttack: [3.5, 5], padRelease: [5, 7],
-    reverbDecayRange: [12, 16], reverbWetRange: [0.80, 0.90],
-    filterFreqRange: [1100, 1700],
-    texture: 'ocean', hasPerc: false, melodyEveryRange: [6, 10],
+    scaleRoot: 'D4', scaleType: 'pentatonicMin', keyVariance: 3,
+    arpPatterns: [[0,2,1,2,0],[0,1,2,0,1],[2,0,1,2,1]],
+    arpSpeeds: ['2n','2n','4n.'],
+    padType: 'sine',     padAttack: [3.5,5], padRelease: [5,7],
+    reverbDecayRange: [6,8],  reverbWetRange: [0.38,0.50],
+    filterFreqRange: [1200,2000], texture: 'ocean', hasPerc: false, melodyEveryRange: [6,10],
   },
   'peaceful-meadow': {
     label: 'Peaceful Meadow', style: 'nature', color: '#27ae60',
@@ -220,18 +186,12 @@ const MOODS = {
       { root: 'C3', quality: 'maj7',  bars: 2 },
       { root: 'D3', quality: 'dom7',  bars: 2 },
     ],
-    scaleRoot: 'G4', scaleType: 'major',
-    keyVariance: 5,
-    arpPatterns: [
-      [0, 1, 2, 3, 2, 1],
-      [0, 2, 1, 3, 1, 2],
-      [3, 2, 1, 0, 1, 2],
-    ],
-    arpSpeeds: ['4n', '4n', '4n.'],
-    padType: 'fattriangle', padAttack: [1.5, 3], padRelease: [3, 5],
-    reverbDecayRange: [6, 10],  reverbWetRange: [0.58, 0.72],
-    filterFreqRange: [2000, 3000],
-    texture: 'wind', hasPerc: false, melodyEveryRange: [3, 6],
+    scaleRoot: 'G4', scaleType: 'major', keyVariance: 5,
+    arpPatterns: [[0,1,2,3,2,1],[0,2,1,3,1,2],[3,2,1,0,1,2]],
+    arpSpeeds: ['4n','4n','4n.'],
+    padType: 'triangle', padAttack: [1.5,3],  padRelease: [3,5],
+    reverbDecayRange: [4,6],  reverbWetRange: [0.28,0.40],
+    filterFreqRange: [2200,3500], texture: 'wind',  hasPerc: false, melodyEveryRange: [3,6],
   },
   'deep-space': {
     label: 'Deep Space', style: 'space', color: '#6c63ff',
@@ -242,18 +202,12 @@ const MOODS = {
       { root: 'G2', quality: 'dom7',  bars: 4 },
       { root: 'E2', quality: 'minor', bars: 4 },
     ],
-    scaleRoot: 'A3', scaleType: 'aeolian',
-    keyVariance: 3,
-    arpPatterns: [
-      [0, 2, 1],
-      [0, 1, 2],
-      [2, 0, 1],
-    ],
-    arpSpeeds: ['2n', '1m', '2n'],
-    padType: 'fatsawtooth', padAttack: [4.5, 6.5], padRelease: [6, 9],
-    reverbDecayRange: [16, 22], reverbWetRange: [0.88, 0.96],
-    filterFreqRange: [700, 1100],
-    texture: 'space', hasPerc: false, melodyEveryRange: [12, 20],
+    scaleRoot: 'A3', scaleType: 'aeolian', keyVariance: 3,
+    arpPatterns: [[0,2,1],[0,1,2],[2,0,1]],
+    arpSpeeds: ['2n','1m','2n'],
+    padType: 'sine',     padAttack: [5,7], padRelease: [7,10],
+    reverbDecayRange: [7,9],  reverbWetRange: [0.44,0.54],
+    filterFreqRange: [800,1200], texture: 'space', hasPerc: false, melodyEveryRange: [12,20],
   },
   'nebula-drift': {
     label: 'Nebula Drift', style: 'space', color: '#9b59b6',
@@ -263,18 +217,12 @@ const MOODS = {
       { root: 'A2', quality: 'dom7',  bars: 2 },
       { root: 'D3', quality: 'maj7',  bars: 2 },
     ],
-    scaleRoot: 'E4', scaleType: 'dorian',
-    keyVariance: 4,
-    arpPatterns: [
-      [0, 2, 1, 0],
-      [0, 1, 2, 1],
-      [2, 1, 0, 2],
-    ],
-    arpSpeeds: ['2n', '2n', '4n.'],
-    padType: 'fatsawtooth', padAttack: [3.5, 5.5], padRelease: [5, 7],
-    reverbDecayRange: [13, 17], reverbWetRange: [0.82, 0.92],
-    filterFreqRange: [900, 1300],
-    texture: 'space', hasPerc: false, melodyEveryRange: [6, 12],
+    scaleRoot: 'E4', scaleType: 'dorian', keyVariance: 4,
+    arpPatterns: [[0,2,1,0],[0,1,2,1],[2,1,0,2]],
+    arpSpeeds: ['2n','2n','4n.'],
+    padType: 'sine',     padAttack: [4,6], padRelease: [5,8],
+    reverbDecayRange: [7,9],  reverbWetRange: [0.42,0.52],
+    filterFreqRange: [1000,1600], texture: 'space', hasPerc: false, melodyEveryRange: [6,12],
   },
   'stellar-journey': {
     label: 'Stellar Journey', style: 'space', color: '#3498db',
@@ -285,18 +233,12 @@ const MOODS = {
       { root: 'Bb2', quality: 'maj7', bars: 2 },
       { root: 'Ab2', quality: 'maj7', bars: 1 },
     ],
-    scaleRoot: 'C4', scaleType: 'phrygian',
-    keyVariance: 3,
-    arpPatterns: [
-      [0, 1, 2, 1],
-      [0, 2, 0, 1],
-      [1, 0, 2, 0],
-    ],
-    arpSpeeds: ['2n', '4n.', '2n'],
-    padType: 'fatsawtooth', padAttack: [3.5, 5], padRelease: [5, 7],
-    reverbDecayRange: [12, 16], reverbWetRange: [0.78, 0.88],
-    filterFreqRange: [1000, 1500],
-    texture: 'space', hasPerc: false, melodyEveryRange: [6, 10],
+    scaleRoot: 'C4', scaleType: 'phrygian', keyVariance: 3,
+    arpPatterns: [[0,1,2,1],[0,2,0,1],[1,0,2,0]],
+    arpSpeeds: ['2n','4n.','2n'],
+    padType: 'sine',     padAttack: [4,5.5], padRelease: [5,7],
+    reverbDecayRange: [6,8],  reverbWetRange: [0.40,0.50],
+    filterFreqRange: [1100,1700], texture: 'space', hasPerc: false, melodyEveryRange: [6,10],
   },
   'late-night': {
     label: 'Late Night Study', style: 'lofi', color: '#e67e22',
@@ -307,18 +249,12 @@ const MOODS = {
       { root: 'C3', quality: 'maj7',  bars: 2 },
       { root: 'A2', quality: 'min7',  bars: 2 },
     ],
-    scaleRoot: 'D4', scaleType: 'dorian',
-    keyVariance: 5,
-    arpPatterns: [
-      [0, 2, 1, 3, 0, 2, 1],
-      [0, 3, 1, 2, 0, 1, 3],
-      [1, 0, 2, 3, 1, 2, 0],
-    ],
-    arpSpeeds: ['8n', '8n', '8n'],
-    padType: 'triangle', padAttack: [0.3, 0.8], padRelease: [1.5, 2.5],
-    reverbDecayRange: [3, 5],  reverbWetRange: [0.38, 0.52],
-    filterFreqRange: [2800, 4000],
-    texture: 'vinyl', hasPerc: true, melodyEveryRange: [4, 6],
+    scaleRoot: 'D4', scaleType: 'dorian', keyVariance: 5,
+    arpPatterns: [[0,2,1,3,0,2,1],[0,3,1,2,0,1,3],[1,0,2,3,1,2,0]],
+    arpSpeeds: ['8n','8n','8n'],
+    padType: 'triangle', padAttack: [0.3,0.8], padRelease: [1.5,2.5],
+    reverbDecayRange: [2,4],  reverbWetRange: [0.22,0.34],
+    filterFreqRange: [2800,4000], texture: 'vinyl', hasPerc: true,  melodyEveryRange: [4,6],
   },
   'rainy-cafe': {
     label: 'Rainy Café', style: 'lofi', color: '#e67e22',
@@ -329,18 +265,12 @@ const MOODS = {
       { root: 'Db3', quality: 'maj7', bars: 2 },
       { root: 'Eb3', quality: 'dom7', bars: 2 },
     ],
-    scaleRoot: 'F4', scaleType: 'pentatonicMin',
-    keyVariance: 4,
-    arpPatterns: [
-      [0, 1, 2, 1, 3, 2],
-      [0, 3, 1, 2, 0, 2],
-      [2, 0, 3, 1, 2, 1],
-    ],
-    arpSpeeds: ['8n', '8n', '8n'],
-    padType: 'triangle', padAttack: [0.3, 0.6], padRelease: [1.5, 2.5],
-    reverbDecayRange: [4, 6],  reverbWetRange: [0.42, 0.58],
-    filterFreqRange: [2500, 3500],
-    texture: 'rain', hasPerc: true, melodyEveryRange: [3, 6],
+    scaleRoot: 'F4', scaleType: 'pentatonicMin', keyVariance: 4,
+    arpPatterns: [[0,1,2,1,3,2],[0,3,1,2,0,2],[2,0,3,1,2,1]],
+    arpSpeeds: ['8n','8n','8n'],
+    padType: 'triangle', padAttack: [0.3,0.6], padRelease: [1.5,2.5],
+    reverbDecayRange: [2,4],  reverbWetRange: [0.24,0.36],
+    filterFreqRange: [2500,3500], texture: 'rain',  hasPerc: true,  melodyEveryRange: [3,6],
   },
   'nostalgic': {
     label: 'Nostalgic Afternoon', style: 'lofi', color: '#d35400',
@@ -351,18 +281,12 @@ const MOODS = {
       { root: 'F2', quality: 'maj7',  bars: 2 },
       { root: 'G2', quality: 'dom7',  bars: 2 },
     ],
-    scaleRoot: 'C4', scaleType: 'pentatonicMaj',
-    keyVariance: 5,
-    arpPatterns: [
-      [0, 2, 1, 2],
-      [0, 1, 2, 1],
-      [2, 0, 1, 0],
-    ],
-    arpSpeeds: ['8n', '8n', '4n.'],
-    padType: 'triangle', padAttack: [0.4, 0.8], padRelease: [2, 3],
-    reverbDecayRange: [3, 5],  reverbWetRange: [0.35, 0.50],
-    filterFreqRange: [3000, 4500],
-    texture: 'vinyl', hasPerc: true, melodyEveryRange: [3, 6],
+    scaleRoot: 'C4', scaleType: 'pentatonicMaj', keyVariance: 5,
+    arpPatterns: [[0,2,1,2],[0,1,2,1],[2,0,1,0]],
+    arpSpeeds: ['8n','8n','4n.'],
+    padType: 'triangle', padAttack: [0.4,0.8], padRelease: [2,3],
+    reverbDecayRange: [2,4],  reverbWetRange: [0.20,0.32],
+    filterFreqRange: [3000,4500], texture: 'vinyl', hasPerc: true,  melodyEveryRange: [3,6],
   },
   'tense': {
     label: 'Tense Atmosphere', style: 'dark', color: '#8e44ad',
@@ -370,21 +294,15 @@ const MOODS = {
     progression: [
       { root: 'C3', quality: 'minor', bars: 3 },
       { root: 'Db3', quality: 'major', bars: 1 },
-      { root: 'Ab2', quality: 'maj7', bars: 2 },
+      { root: 'Ab2', quality: 'maj7',  bars: 2 },
       { root: 'Bb2', quality: 'minor', bars: 2 },
     ],
-    scaleRoot: 'C4', scaleType: 'phrygian',
-    keyVariance: 3,
-    arpPatterns: [
-      [0, -1, 1, -1, 2, -1],
-      [0, -1, -1, 1, -1, 2],
-      [-1, 0, -1, 2, -1, 1],
-    ],
-    arpSpeeds: ['4n', '4n', '4n.'],
-    padType: 'fatsawtooth', padAttack: [3.5, 5], padRelease: [4.5, 6],
-    reverbDecayRange: [8, 12],  reverbWetRange: [0.62, 0.78],
-    filterFreqRange: [650, 950],
-    texture: 'wind', hasPerc: false, melodyEveryRange: [0, 0],
+    scaleRoot: 'C4', scaleType: 'phrygian', keyVariance: 3,
+    arpPatterns: [[0,-1,1,-1,2,-1],[0,-1,-1,1,-1,2],[-1,0,-1,2,-1,1]],
+    arpSpeeds: ['4n','4n','4n.'],
+    padType: 'sine',     padAttack: [3.5,5], padRelease: [4.5,6],
+    reverbDecayRange: [6,8],  reverbWetRange: [0.36,0.48],
+    filterFreqRange: [700,1100], texture: 'wind',  hasPerc: false, melodyEveryRange: [0,0],
   },
   'mysterious': {
     label: 'Mysterious Cave', style: 'dark', color: '#6c3483',
@@ -394,18 +312,12 @@ const MOODS = {
       { root: 'C3', quality: 'maj7',  bars: 2 },
       { root: 'G2', quality: 'minor', bars: 2 },
     ],
-    scaleRoot: 'E4', scaleType: 'aeolian',
-    keyVariance: 3,
-    arpPatterns: [
-      [0, 1, 2, 1],
-      [0, 2, 1, 2],
-      [1, 0, 2, 0],
-    ],
-    arpSpeeds: ['4n', '4n.', '4n'],
-    padType: 'fatsawtooth', padAttack: [3, 4.5], padRelease: [4.5, 6],
-    reverbDecayRange: [11, 15], reverbWetRange: [0.74, 0.86],
-    filterFreqRange: [800, 1200],
-    texture: 'space', hasPerc: false, melodyEveryRange: [6, 10],
+    scaleRoot: 'E4', scaleType: 'aeolian', keyVariance: 3,
+    arpPatterns: [[0,1,2,1],[0,2,1,2],[1,0,2,0]],
+    arpSpeeds: ['4n','4n.','4n'],
+    padType: 'sine',     padAttack: [3,4.5], padRelease: [4.5,6],
+    reverbDecayRange: [6,8],  reverbWetRange: [0.40,0.50],
+    filterFreqRange: [900,1400], texture: 'space', hasPerc: false, melodyEveryRange: [6,10],
   },
   'epic': {
     label: 'Epic Horizon', style: 'dark', color: '#922b21',
@@ -416,18 +328,12 @@ const MOODS = {
       { root: 'Bb2', quality: 'major', bars: 2 },
       { root: 'C3', quality: 'major', bars: 2 },
     ],
-    scaleRoot: 'D4', scaleType: 'aeolian',
-    keyVariance: 4,
-    arpPatterns: [
-      [0, 2, 1, 0, 2],
-      [0, 1, 2, 0, 1],
-      [2, 0, 2, 1, 0],
-    ],
-    arpSpeeds: ['4n', '4n', '4n.'],
-    padType: 'fatsawtooth', padAttack: [2.5, 4], padRelease: [3.5, 5],
-    reverbDecayRange: [7, 11],  reverbWetRange: [0.58, 0.72],
-    filterFreqRange: [1300, 1900],
-    texture: 'wind', hasPerc: false, melodyEveryRange: [6, 10],
+    scaleRoot: 'D4', scaleType: 'aeolian', keyVariance: 4,
+    arpPatterns: [[0,2,1,0,2],[0,1,2,0,1],[2,0,2,1,0]],
+    arpSpeeds: ['4n','4n','4n.'],
+    padType: 'sine',     padAttack: [2.5,4], padRelease: [3.5,5],
+    reverbDecayRange: [5,7],  reverbWetRange: [0.34,0.46],
+    filterFreqRange: [1400,2200], texture: 'wind',  hasPerc: false, melodyEveryRange: [6,10],
   },
 };
 
@@ -520,76 +426,73 @@ class AmbientEngine {
     await Tone.start();
     const cfg = this.cfg;
 
-    // ── Pick random variant values for this generation ──
-    const bpm        = Math.round(randomBetween(cfg.bpmRange[0], cfg.bpmRange[1]));
-    const arpPattern = pickFrom(cfg.arpPatterns);
-    const arpSpeed   = pickFrom(cfg.arpSpeeds);
-    const reverbWet  = randomBetween(cfg.reverbWetRange[0], cfg.reverbWetRange[1]);
+    // ── Pick random variant for this generation ──
+    const bpm         = Math.round(randomBetween(cfg.bpmRange[0], cfg.bpmRange[1]));
+    const arpPattern  = pickFrom(cfg.arpPatterns);
+    const arpSpeed    = pickFrom(cfg.arpSpeeds);
+    const reverbWet   = randomBetween(cfg.reverbWetRange[0], cfg.reverbWetRange[1]);
     const reverbDecay = randomBetween(cfg.reverbDecayRange[0], cfg.reverbDecayRange[1]);
-    const filterFreq = Math.round(randomBetween(cfg.filterFreqRange[0], cfg.filterFreqRange[1]));
-    const keyShift   = Math.round(Math.random() * cfg.keyVariance);
-    const padAttack  = randomBetween(cfg.padAttack[0], cfg.padAttack[1]);
-    const padRelease = randomBetween(cfg.padRelease[0], cfg.padRelease[1]);
+    const filterFreq  = Math.round(randomBetween(cfg.filterFreqRange[0], cfg.filterFreqRange[1]));
+    const keyShift    = Math.round(Math.random() * cfg.keyVariance);
+    const padAttack   = randomBetween(cfg.padAttack[0], cfg.padAttack[1]);
+    const padRelease  = randomBetween(cfg.padRelease[0], cfg.padRelease[1]);
     const melodyEvery = cfg.melodyEveryRange[1] === 0 ? 0
       : Math.round(randomBetween(cfg.melodyEveryRange[0], cfg.melodyEveryRange[1]));
-    const melodyRegister = Math.random() < 0.5 ? 0 : 1;
+    const melodyReg   = Math.random() < 0.5 ? 0 : 1;
 
-    // Transpose entire progression by keyShift semitones
-    const progression = cfg.progression.map(chord => ({
-      ...chord,
-      root: transposeNote(chord.root, keyShift),
-    }));
-    const scaleRoot = transposeNote(cfg.scaleRoot, keyShift);
+    const progression = cfg.progression.map(c => ({ ...c, root: transposeNote(c.root, keyShift) }));
+    const scaleRoot   = transposeNote(cfg.scaleRoot, keyShift);
+    const totalBars   = progression.reduce((s, c) => s + c.bars, 0);
 
-    // Human-readable key name for display
-    const rootNoteName = NOTE_NAMES[Tone.Frequency(scaleRoot).toMidi() % 12];
-    this.variantLabel = `${rootNoteName} · ${bpm} BPM`;
+    const rootName = NOTE_NAMES[Tone.Frequency(scaleRoot).toMidi() % 12];
+    this.variantLabel = `${rootName} · ${bpm} BPM`;
 
     Tone.Transport.bpm.value     = bpm;
     Tone.Transport.timeSignature = [4, 4];
 
-    const totalBars = progression.reduce((s, c) => s + c.bars, 0);
-
-    // ── FX chain ──
-    const reverb   = new Tone.Reverb({ decay: reverbDecay, preDelay: 0.2, wet: reverbWet });
+    // ── Master FX chain (music layers go here) ──
+    // Texture noise is routed DIRECTLY to destination, bypassing reverb,
+    // so it doesn't get smeared into the musical signal.
+    const reverb   = new Tone.Reverb({ decay: reverbDecay, preDelay: 0.1, wet: reverbWet });
     await reverb.ready;
     const filter   = new Tone.Filter(filterFreq, 'lowpass', -12);
-    const compress = new Tone.Compressor(-18, 4);
-    const master   = new Tone.Volume(-4);
+    const limiter  = new Tone.Limiter(-2);
+    const master   = new Tone.Volume(-8);
     this.analyser  = new Tone.Analyser('waveform', 512);
-    master.chain(compress, filter, reverb, this.analyser, Tone.Destination);
-    this.nodes.push(reverb, filter, compress, master);
+    // chain: music → master vol → filter → reverb → limiter → analyser → speakers
+    master.chain(filter, reverb, limiter, this.analyser, Tone.Destination);
+    this.nodes.push(reverb, filter, limiter, master);
 
     // ── Pad ──
     const padSynth = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: cfg.padType },
-      envelope: { attack: padAttack, decay: 1, sustain: 0.9, release: padRelease },
+      envelope:   { attack: padAttack, decay: 1, sustain: 0.85, release: padRelease },
     });
-    padSynth.volume.value = -12;
+    padSynth.volume.value = -14;
     padSynth.connect(master);
     this.nodes.push(padSynth);
 
     const padPart = new Tone.Part((time, ev) => {
       padSynth.releaseAll(time);
       ev.notes.forEach((note, i) => {
-        padSynth.triggerAttack(note, time + i * 0.035 + (Math.random() - 0.5) * 0.02, 0.35 + Math.random() * 0.1);
+        padSynth.triggerAttack(note, time + i * 0.04, 0.4 + Math.random() * 0.08);
       });
-      padSynth.releaseAll(time + Tone.Time(`${ev.bars}m`).toSeconds() - padRelease * 0.6);
+      padSynth.releaseAll(time + Tone.Time(`${ev.bars}m`).toSeconds() - padRelease * 0.5);
     }, computePadEvents(progression));
     padPart.loop = true; padPart.loopEnd = `${totalBars}m`;
     this.parts.push(padPart);
 
-    // ── Arp ──
+    // ── Arp (subtle — outlines harmony without dominating) ──
     const arpSynth = new Tone.Synth({
       oscillator: { type: 'sine' },
-      envelope: { attack: 0.02, decay: 0.4, sustain: 0.3, release: 1.2 },
+      envelope:   { attack: 0.015, decay: 0.5, sustain: 0.2, release: 1.0 },
     });
-    arpSynth.volume.value = cfg.style === 'lofi' ? -16 : -22;
+    arpSynth.volume.value = -26;
     arpSynth.connect(master);
     this.nodes.push(arpSynth);
 
     const arpPart = new Tone.Part((time, ev) => {
-      arpSynth.triggerAttackRelease(ev.note, arpSpeed, time + (Math.random() - 0.5) * 0.012, ev.velocity);
+      arpSynth.triggerAttackRelease(ev.note, arpSpeed, time + (Math.random() - 0.5) * 0.01, ev.velocity);
     }, computeArpEvents(progression, arpPattern, arpSpeed));
     arpPart.loop = true; arpPart.loopEnd = `${totalBars}m`;
     this.parts.push(arpPart);
@@ -597,14 +500,14 @@ class AmbientEngine {
     // ── Bass ──
     const bassSynth = new Tone.Synth({
       oscillator: { type: 'sine' },
-      envelope: { attack: padAttack * 0.8, decay: 0.5, sustain: 0.85, release: padRelease },
+      envelope:   { attack: padAttack * 0.7, decay: 0.5, sustain: 0.8, release: padRelease },
     });
-    bassSynth.volume.value = cfg.style === 'space' ? -8 : -16;
+    bassSynth.volume.value = -20;
     bassSynth.connect(master);
     this.nodes.push(bassSynth);
 
     const bassPart = new Tone.Part((time, ev) => {
-      bassSynth.triggerAttackRelease(ev.note, ev.duration, time, 0.55 + Math.random() * 0.1);
+      bassSynth.triggerAttackRelease(ev.note, ev.duration, time, 0.55);
     }, computeBassEvents(progression));
     bassPart.loop = true; bassPart.loopEnd = `${totalBars}m`;
     this.parts.push(bassPart);
@@ -613,17 +516,13 @@ class AmbientEngine {
     if (melodyEvery > 0) {
       const melSynth = new Tone.Synth({
         oscillator: { type: cfg.style === 'lofi' ? 'triangle' : 'sine' },
-        envelope: {
-          attack:  cfg.style === 'lofi' ? 0.04 : 0.6,
-          decay:   0.4, sustain: 0.5,
-          release: cfg.style === 'lofi' ? 1 : 2.5,
-        },
+        envelope:   { attack: cfg.style === 'lofi' ? 0.05 : 0.7, decay: 0.3, sustain: 0.45, release: cfg.style === 'lofi' ? 1.2 : 2.5 },
       });
-      melSynth.volume.value = -20;
+      melSynth.volume.value = -24;
       melSynth.connect(master);
       this.nodes.push(melSynth);
 
-      const melEvents = computeMelodyEvents(progression, scaleRoot, cfg.scaleType, melodyEvery, melodyRegister);
+      const melEvents = computeMelodyEvents(progression, scaleRoot, cfg.scaleType, melodyEvery, melodyReg);
       if (melEvents.length > 0) {
         const melPart = new Tone.Part((time, ev) => {
           melSynth.triggerAttackRelease(ev.note, ev.duration, time, ev.velocity);
@@ -636,20 +535,20 @@ class AmbientEngine {
     // ── Lo-fi percussion ──
     if (cfg.hasPerc) this._buildPerc(master, totalBars);
 
-    // ── Texture ──
-    this._buildTexture(cfg.texture, master);
+    // ── Texture (routed directly to destination — no reverb smear) ──
+    this._buildTexture(cfg.texture, totalBars);
 
     Tone.Transport.loop    = true;
     Tone.Transport.loopEnd = `${totalBars}m`;
   }
 
   _buildPerc(dest, totalBars) {
-    const kick  = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 6 });
-    kick.volume.value = -20; kick.connect(dest);
-    const snare = new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.001, decay: 0.15, sustain: 0, release: 0.05 } });
-    snare.volume.value = -26; snare.connect(dest);
-    const hihat = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.01 } });
-    hihat.volume.value = -32; hihat.connect(dest);
+    const kick  = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 5 });
+    kick.volume.value = -22; kick.connect(dest);
+    const snare = new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.04 } });
+    snare.volume.value = -28; snare.connect(dest);
+    const hihat = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.035, sustain: 0, release: 0.01 } });
+    hihat.volume.value = -36; hihat.connect(dest);
     this.nodes.push(kick, snare, hihat);
 
     const events = [];
@@ -663,56 +562,43 @@ class AmbientEngine {
         events.push({ time: `${bar}:${b}:2`, type: 'hihat' });
       }
     }
-    const percPart = new Tone.Part((time, ev) => {
+    const pp = new Tone.Part((time, ev) => {
       if (ev.type === 'kick')  kick.triggerAttackRelease('C1', '8n', time);
       if (ev.type === 'snare') snare.triggerAttackRelease('8n', time);
-      if (ev.type === 'hihat' && Math.random() < 0.6) hihat.triggerAttackRelease('16n', time);
+      if (ev.type === 'hihat' && Math.random() < 0.55) hihat.triggerAttackRelease('16n', time);
     }, events);
-    percPart.loop = true; percPart.loopEnd = `${totalBars}m`;
-    this.parts.push(percPart);
+    pp.loop = true; pp.loopEnd = `${totalBars}m`;
+    this.parts.push(pp);
   }
 
-  _buildTexture(type, dest) {
+  // Texture noise goes directly to Tone.Destination (bypasses the reverb chain)
+  // so it adds subliminal ambience without smearing the musical signal.
+  _buildTexture(type, totalBars) {
     if (!type) return;
-    if (type === 'rain' || type === 'ocean') {
-      const noise = new Tone.Noise(type === 'ocean' ? 'brown' : 'pink').start();
-      const filt  = new Tone.Filter(type === 'ocean' ? 500 : 1000, 'bandpass', -12);
-      const vol   = new Tone.Volume(-32);
-      noise.chain(filt, vol, dest);
+
+    const mkNoise = (color, filterFreq, filterType, volDb, lfoHz) => {
+      const noise = new Tone.Noise(color).start();
+      const filt  = new Tone.Filter(filterFreq, filterType);
+      const vol   = new Tone.Volume(volDb);
+      noise.chain(filt, vol, Tone.Destination);
+      if (lfoHz) {
+        const lfo = new Tone.LFO({ frequency: lfoHz, min: volDb - 4, max: volDb + 2 }).start();
+        lfo.connect(vol.volume);
+        this.nodes.push(lfo);
+      }
       this.nodes.push(noise, filt, vol);
-    }
-    if (type === 'space') {
-      const noise = new Tone.Noise('brown').start();
-      const filt  = new Tone.Filter(280, 'lowpass');
-      const lfo   = new Tone.LFO({ frequency: 0.05, min: -42, max: -36 }).start();
-      const vol   = new Tone.Volume(-42);
-      lfo.connect(vol.volume);
-      noise.chain(filt, vol, dest);
-      this.nodes.push(noise, filt, lfo, vol);
-    }
-    if (type === 'wind') {
-      const noise = new Tone.Noise('pink').start();
-      const filt  = new Tone.Filter(600, 'bandpass');
-      const lfo   = new Tone.LFO({ frequency: 0.07, min: -38, max: -30 }).start();
-      const vol   = new Tone.Volume(-38);
-      lfo.connect(vol.volume);
-      noise.chain(filt, vol, dest);
-      this.nodes.push(noise, filt, lfo, vol);
-    }
-    if (type === 'vinyl') {
-      const noise = new Tone.Noise('pink').start();
-      const filt  = new Tone.Filter(5000, 'highpass');
-      const lfo   = new Tone.LFO({ frequency: 0.3, min: -46, max: -40 }).start();
-      const vol   = new Tone.Volume(-44);
-      lfo.connect(vol.volume);
-      noise.chain(filt, vol, dest);
-      this.nodes.push(noise, filt, lfo, vol);
-    }
+    };
+
+    if (type === 'rain')  mkNoise('pink',  1200, 'bandpass', -44, 0.12);
+    if (type === 'ocean') mkNoise('brown',  500, 'bandpass', -46, 0.06);
+    if (type === 'wind')  mkNoise('pink',   600, 'bandpass', -44, 0.08);
+    if (type === 'space') mkNoise('brown',  280, 'lowpass',  -50, 0.04);
+    if (type === 'vinyl') mkNoise('pink',  5500, 'highpass', -50, 0.30);
   }
 
   start()  { this.parts.forEach(p => p.start(0)); Tone.Transport.start('+0.1'); isPlaying = true; }
-  pause()  { Tone.Transport.pause(); isPlaying = false; }
-  resume() { Tone.Transport.start(); isPlaying = true; }
+  pause()  { Tone.Transport.pause();  isPlaying = false; }
+  resume() { Tone.Transport.start();  isPlaying = true;  }
 
   stop() {
     Tone.Transport.stop();
@@ -746,7 +632,6 @@ function startVisualizer() {
   }
   draw();
 }
-
 function stopVisualizer() { if (visualizerAF) { cancelAnimationFrame(visualizerAF); visualizerAF = null; } }
 
 // ─── Progress ─────────────────────────────────────────────────────────────────
@@ -799,8 +684,7 @@ generateBtn.addEventListener('click', async () => {
     setupRecorder();
     engine.start();
 
-    isGenerating = false;
-    isPlaying    = true;
+    isGenerating = false; isPlaying = true;
 
     generateBtn.classList.add('generating');
     generateBtn.disabled = false;
@@ -851,10 +735,9 @@ function stopPlayback(finished) {
   generateBtn.querySelector('.btn-label').textContent = `Generate "${MOODS[selectedMood].label}"`;
   generateBtn.disabled     = false;
   playPauseBtn.textContent = '⏸ Pause';
-
-  progressBar.style.width = finished ? '100%' : progressBar.style.width;
-  statusText.textContent  = finished ? 'Done! Download your track below.' : 'Stopped.';
-  nowPlaying.textContent  = '';
+  progressBar.style.width  = finished ? '100%' : progressBar.style.width;
+  statusText.textContent   = finished ? 'Done! Download your track below.' : 'Stopped.';
+  nowPlaying.textContent   = '';
 }
 
 // ─── Download ─────────────────────────────────────────────────────────────────
@@ -863,8 +746,6 @@ downloadBtn.addEventListener('click', () => {
   const blob = new Blob(recordedChunks, { type: 'audio/webm' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
-  a.href     = url;
-  a.download = `ambientforge-${selectedMood}-${durationMinutes}min.webm`;
-  a.click();
-  URL.revokeObjectURL(url);
+  a.href = url; a.download = `ambientforge-${selectedMood}-${durationMinutes}min.webm`;
+  a.click(); URL.revokeObjectURL(url);
 });
